@@ -37,7 +37,7 @@ static void           print_response(const uint8_t *response, int length);
 #define LOGIN_FAILURE_LEN 45
 #define ACC_CREATE_SUCCESS_LEN 9
 #define ACC_CREATE_FAILURE_LEN 24
-#define LOGIN_SUCCESS_LEN 9
+#define LOGIN_SUCCESS_LEN 10
 
 // packet type codes
 #define ACC_LOGIN 0x0A
