@@ -22,6 +22,7 @@ static void           print_response(const uint8_t *response, int length);
 
 #define UNKNOWN_OPTION_MESSAGE_LEN 24
 #define BASE_TEN 10
+#define SLEEP_LEN 5
 #define USERNAME "Testing"
 #define PASSWORD "Password123"
 
@@ -32,7 +33,7 @@ static void           print_response(const uint8_t *response, int length);
 #define PASSWORD_LEN 0x0B
 #define LOGIN_LENGTH 22
 
-//response packet lengths
+// response packet lengths
 #define LOGIN_FAILURE_LEN 45
 #define ACC_CREATE_SUCCESS_LEN 9
 #define ACC_CREATE_FAILURE_LEN 24
@@ -40,7 +41,7 @@ static void           print_response(const uint8_t *response, int length);
 
 // packet type codes
 #define ACC_LOGIN 0x0A
-#define ACC_CREATE 0x0B
+#define ACC_CREATE 0x0D
 
 // data type codes
 #define UTF8_STR 0x0C
@@ -93,7 +94,7 @@ int main(int argc, char *argv[])
 
     // send account create message
     construct_acc_message(packet, &length, ACC_CREATE);
-
+    sleep(SLEEP_LEN);
     bytes_sent = send(sockfd, packet, length, 0);
     if(bytes_sent == -1)
     {
@@ -112,6 +113,7 @@ int main(int argc, char *argv[])
     }
     print_response(acc_create_success, ACC_CREATE_SUCCESS_LEN);
 
+    sleep(SLEEP_LEN);
     // send account create message again
     bytes_sent = send(sockfd, packet, length, 0);
     if(bytes_sent == -1)
@@ -139,7 +141,7 @@ int main(int argc, char *argv[])
 
     // send login request
     construct_acc_message(packet, &length, ACC_LOGIN);
-
+    sleep(SLEEP_LEN);
     bytes_sent = send(sockfd, packet, length, 0);
     if(bytes_sent == -1)
     {
