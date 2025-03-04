@@ -17,7 +17,9 @@ static void           convert_address(const char *address, struct sockaddr_stora
 static int            socket_create(int domain, int type, int protocol);
 static void           socket_connect(int sockfd, struct sockaddr_storage *addr, in_port_t port);
 static void           socket_close(int client_fd);
-static void           construct_acc_message(uint8_t *packet, size_t *length, uint8_t packet_type);
+static void           construct_acc_message(uint8_t *packet, size_t *length, uint8_t packet_type, const char *type);
+static void           construct_cht_message(uint8_t *packet, size_t *length, const char *type);
+static void           construct_logout_message(uint8_t *packet, size_t *length, const char *type);
 static void           print_response(const uint8_t *response, int length);
 
 #define UNKNOWN_OPTION_MESSAGE_LEN 24
@@ -25,26 +27,37 @@ static void           print_response(const uint8_t *response, int length);
 #define SLEEP_LEN 5
 #define USERNAME "Testing"
 #define PASSWORD "Password123"
+#define VERSION 0x02
+#define TIMESTAMP "20240301123045Z"
+#define MESSAGE "hi"
 
 // values being sent
 #define BUFFER_SIZE 1024
-#define DEFAULT_SENDER_ID 0x0000
+#define DEFAULT_SENDER_ID 0x0001
 #define USERNAME_LEN 0x07
 #define PASSWORD_LEN 0x0B
 #define LOGIN_LENGTH 22
+#define CHT_PAYLOAD_LENGTH 30
+#define TIMESTAMP_LENGTH 0x0F
+#define MESSAGE_LENGTH 0x02
 
 // response packet lengths
 #define LOGIN_FAILURE_LEN 45
 #define ACC_CREATE_SUCCESS_LEN 9
 #define ACC_CREATE_FAILURE_LEN 24
 #define LOGIN_SUCCESS_LEN 10
+#define CHT_SEND_SUCCESS_LEN 9
+#define LOGOUT_SUCCESS_LEN 9
 
 // packet type codes
 #define ACC_LOGIN 0x0A
 #define ACC_CREATE 0x0D
+#define ACC_LOGOUT 0X0C
+#define CHT_SEND 0x14
 
 // data type codes
 #define UTF8_STR 0x0C
+#define GENERALIZED_TIME 0x18
 
 int main(int argc, char *argv[])
 {
@@ -58,6 +71,8 @@ int main(int argc, char *argv[])
     uint8_t                 acc_create_success[BUFFER_SIZE];
     uint8_t                 acc_create_failure[BUFFER_SIZE];
     uint8_t                 login_success[BUFFER_SIZE];
+    uint8_t                 cht_send_success[BUFFER_SIZE];
+    uint8_t                 logout_success[BUFFER_SIZE];
     size_t                  length;
     ssize_t                 bytes_sent;
     ssize_t                 bytes_received;
@@ -71,7 +86,7 @@ int main(int argc, char *argv[])
     socket_connect(sockfd, &addr, port);
 
     // send login request
-    construct_acc_message(packet, &length, ACC_LOGIN);
+    construct_acc_message(packet, &length, ACC_LOGIN, "login");
 
     bytes_sent = send(sockfd, packet, length, 0);
     if(bytes_sent == -1)
@@ -93,7 +108,7 @@ int main(int argc, char *argv[])
     print_response(login_failure, LOGIN_FAILURE_LEN);
 
     // send account create message
-    construct_acc_message(packet, &length, ACC_CREATE);
+    construct_acc_message(packet, &length, ACC_CREATE, "create");
     sleep(SLEEP_LEN);
     bytes_sent = send(sockfd, packet, length, 0);
     if(bytes_sent == -1)
@@ -140,7 +155,7 @@ int main(int argc, char *argv[])
     print_response(acc_create_failure, ACC_CREATE_FAILURE_LEN);
 
     // send login request
-    construct_acc_message(packet, &length, ACC_LOGIN);
+    construct_acc_message(packet, &length, ACC_LOGIN, "login");
     sleep(SLEEP_LEN);
     bytes_sent = send(sockfd, packet, length, 0);
     if(bytes_sent == -1)
@@ -161,6 +176,50 @@ int main(int argc, char *argv[])
 
     print_response(login_success, LOGIN_SUCCESS_LEN);
 
+    // send chat message
+    construct_cht_message(packet, &length, "chat send");
+    sleep(SLEEP_LEN);
+    bytes_sent = send(sockfd, packet, length, 0);
+    if(bytes_sent == -1)
+    {
+        perror("send");
+        close(sockfd);
+        return EXIT_FAILURE;
+    }
+
+    // receive sys_success
+    bytes_received = recv(sockfd, cht_send_success, CHT_SEND_SUCCESS_LEN, 0);
+    if(bytes_received == -1)
+    {
+        perror("recv");
+        close(sockfd);
+        return EXIT_FAILURE;
+    }
+
+    print_response(cht_send_success, CHT_SEND_SUCCESS_LEN);
+
+    // send logout message
+    construct_logout_message(packet, &length, "logout");
+    sleep(SLEEP_LEN);
+    bytes_sent = send(sockfd, packet, length, 0);
+    if(bytes_sent == -1)
+    {
+        perror("send");
+        close(sockfd);
+        return EXIT_FAILURE;
+    }
+
+    // receive sys_success for logout
+    bytes_received = recv(sockfd, logout_success, LOGOUT_SUCCESS_LEN, 0);
+    if(bytes_received == -1)
+    {
+        perror("recv");
+        close(sockfd);
+        return EXIT_FAILURE;
+    }
+
+    print_response(cht_send_success, CHT_SEND_SUCCESS_LEN);
+
     socket_close(sockfd);
 
     return EXIT_SUCCESS;
@@ -169,7 +228,7 @@ int main(int argc, char *argv[])
 static void print_response(const uint8_t *response, int length)
 {
     int current_byte = 0;
-    printf("response: ");
+    printf("\nYour server responded: ");
     while(current_byte < length)
     {
         printf("%02x ", response[current_byte++]);
@@ -177,7 +236,7 @@ static void print_response(const uint8_t *response, int length)
     printf("\n");
 }
 
-static void construct_acc_message(uint8_t *packet, size_t *length, uint8_t packet_type)
+static void construct_acc_message(uint8_t *packet, size_t *length, uint8_t packet_type, const char *type)
 {
     size_t   offset = 0;
     uint16_t payload_length;
@@ -187,17 +246,17 @@ static void construct_acc_message(uint8_t *packet, size_t *length, uint8_t packe
     packet[offset++] = packet_type;
 
     // Version (1 byte)
-    packet[offset++] = 0x01;    // Version: 1
+    packet[offset++] = VERSION;    // Version: 2
 
     // Sender ID (2 bytes) - Using htons() for network byte order
     sender_id = htons(DEFAULT_SENDER_ID);
-    memcpy(&packet[offset], &sender_id, sizeof(sender_id));
+    memcpy(&packet[offset], &sender_id, 2);
     offset += 2;
 
     // Payload Length (2 bytes) - Calculated dynamically
     payload_length = htons(LOGIN_LENGTH);
-    memcpy(&packet[offset], &payload_length, sizeof(payload_length));
-    offset += sizeof(payload_length);
+    memcpy(&packet[offset], &payload_length, 2);
+    offset += 2;
 
     // Username
     packet[offset++] = UTF8_STR;        // UTF8 String type
@@ -218,7 +277,97 @@ static void construct_acc_message(uint8_t *packet, size_t *length, uint8_t packe
     // Final packet size
     *length = offset;
 
-    printf("Constructed packet (%zu bytes):\n", *length);
+    printf("\nConstructed %s client packet (%zu bytes):\n", type, *length);
+    for(size_t i = 0; i < *length; i++)
+    {
+        printf("%02X ", packet[i]);
+    }
+    printf("\n");
+}
+
+static void construct_logout_message(uint8_t *packet, size_t *length, const char *type)
+{
+    size_t   offset = 0;
+    uint16_t payload_length;
+    uint16_t sender_id;
+
+    // Packet type (1 byte)
+    packet[offset++] = ACC_LOGOUT;
+
+    // Version (1 byte)
+    packet[offset++] = VERSION;    // Version: 2
+
+    // Sender ID (2 bytes) - Using htons() for network byte order
+    sender_id = htons(DEFAULT_SENDER_ID);
+    memcpy(&packet[offset], &sender_id, 2);
+    offset += 2;
+
+    // Payload Length (2 bytes)
+    payload_length = htons(0);
+    memcpy(&packet[offset], &payload_length, 2);
+    offset += 2;
+
+    // Final packet size
+    *length = offset;
+
+    printf("\nConstructed %s client packet (%zu bytes):\n", type, *length);
+    for(size_t i = 0; i < *length; i++)
+    {
+        printf("%02X ", packet[i]);
+    }
+    printf("\n");
+}
+
+static void construct_cht_message(uint8_t *packet, size_t *length, const char *type)
+{
+    size_t   offset = 0;
+    uint16_t payload_length;
+    uint16_t sender_id;
+
+    // Packet type (1 byte)
+    packet[offset++] = CHT_SEND;
+
+    // Version (1 byte)
+    packet[offset++] = VERSION;    // Version: 2
+
+    // Sender ID (2 bytes) - Using htons() for network byte order
+    sender_id = htons(DEFAULT_SENDER_ID);
+    memcpy(&packet[offset], &sender_id, 2);
+    offset += 2;
+
+    // Payload Length (2 bytes)
+    payload_length = htons(CHT_PAYLOAD_LENGTH);
+    memcpy(&packet[offset], &payload_length, 2);
+    offset += 2;
+
+    // Timestamp
+    packet[offset++] = GENERALIZED_TIME;    // Generalized Time type
+    packet[offset++] = TIMESTAMP_LENGTH;    // length 15
+    for(int i = 0; i < TIMESTAMP_LENGTH; i++)
+    {
+        packet[offset++] = (uint8_t)TIMESTAMP[i];
+    }
+
+    // Content
+    packet[offset++] = UTF8_STR;          // UTF8 String type
+    packet[offset++] = MESSAGE_LENGTH;    // length 2
+    for(int i = 0; i < MESSAGE_LENGTH; i++)
+    {
+        packet[offset++] = (uint8_t)MESSAGE[i];
+    }
+
+    // Username
+    packet[offset++] = UTF8_STR;        // UTF8 String type
+    packet[offset++] = USERNAME_LEN;    // length 7
+    for(int i = 0; i < USERNAME_LEN; i++)
+    {
+        packet[offset++] = (uint8_t)USERNAME[i];
+    }
+
+    // Final packet size
+    *length = offset;
+
+    printf("\nConstructed %s client packet (%zu bytes):\n", type, *length);
     for(size_t i = 0; i < *length; i++)
     {
         printf("%02X ", packet[i]);
